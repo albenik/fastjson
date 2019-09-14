@@ -3,6 +3,7 @@ package fastjson
 import (
 	"fmt"
 	"github.com/valyala/fastjson/fastfloat"
+	"io"
 	"strconv"
 	"strings"
 	"unicode/utf16"
@@ -265,6 +266,30 @@ func escapeString(dst []byte, s string) []byte {
 	return strconv.AppendQuote(dst, s)
 }
 
+func writeTo(w io.Writer, t int, p ...byte) (int, error) {
+	n, err := w.Write(p)
+	return t + n, err
+}
+
+func writeEscapedStringTo(w io.Writer, t int, s string) (n int, err error) {
+	if !hasSpecialChars(s) {
+		// Fast path - nothing to escape.
+		if n, err = writeTo(w, t, '"'); err != nil {
+			return
+		}
+		if n, err = writeTo(w, n, s2b(s)...); err != nil {
+			return
+		}
+		return writeTo(w, n, '"')
+	}
+
+	// Slow path.
+	// TODO avoid allocation by replacing strconv.Quote by ???
+	n, err = w.Write(s2b(strconv.Quote(s)))
+	n += t
+	return
+}
+
 func hasSpecialChars(s string) bool {
 	if strings.IndexByte(s, '"') >= 0 || strings.IndexByte(s, '\\') >= 0 {
 		return true
@@ -460,6 +485,45 @@ func (o *Object) MarshalTo(dst []byte) []byte {
 	return dst
 }
 
+// WriteTo writes marshaled o to w and returns the number of written bytes or error.
+func (o *Object) WriteTo(w io.Writer) (n int, err error) {
+	if n, err = writeTo(w, n, '{'); err != nil {
+		return
+	}
+	var n2 int
+	for i, kv := range o.kvs {
+		if o.keysUnescaped {
+			if n, err = writeEscapedStringTo(w, n, kv.k); err != nil {
+				return
+			}
+		} else {
+			if n, err = writeTo(w, n, '"'); err != nil {
+				return
+			}
+			if n, err = writeTo(w, n, s2b(kv.k)...); err != nil {
+				return
+			}
+			if n, err = writeTo(w, n, '"'); err != nil {
+				return
+			}
+		}
+		if n, err = writeTo(w, n, ':'); err != nil {
+			return
+		}
+		n2, err = kv.v.WriteTo(w)
+		n += n2
+		if err != nil {
+			return
+		}
+		if i != len(o.kvs)-1 {
+			if n, err = writeTo(w, n, ','); err != nil {
+				return
+			}
+		}
+	}
+	return writeTo(w, n, '}')
+}
+
 // String returns string representation for the o.
 //
 // This function is for debugging purposes only. It isn't optimized for speed.
@@ -584,6 +648,52 @@ func (v *Value) MarshalTo(dst []byte) []byte {
 		return append(dst, "null"...)
 	default:
 		panic(fmt.Errorf("BUG: unexpected Value type: %d", v.t))
+	}
+}
+
+// WriteTo writes marshaled v to writer and returns the number of written bytes or error.
+func (v *Value) WriteTo(w io.Writer) (n int, err error) {
+	switch v.t {
+	case typeRawString:
+		if n, err = writeTo(w, n, '"'); err != nil {
+			return
+		}
+		if n, err = writeTo(w, n, s2b(v.s)...); err != nil {
+			return
+		}
+		return writeTo(w, n, '"')
+	case TypeObject:
+		return v.o.WriteTo(w)
+	case TypeArray:
+		if n, err = writeTo(w, n, '['); err != nil {
+			return
+		}
+		var n2 int
+		for i, vv := range v.a {
+			n2, err = vv.WriteTo(w)
+			n += n2
+			if err != nil {
+				return
+			}
+			if i != len(v.a)-1 {
+				if n, err = writeTo(w, n, ','); err != nil {
+					return
+				}
+			}
+		}
+		return writeTo(w, n, ']')
+	case TypeString:
+		return writeEscapedStringTo(w, n, v.s)
+	case TypeNumber:
+		return w.Write(s2b(v.s))
+	case TypeTrue:
+		return w.Write(s2b("true"))
+	case TypeFalse:
+		return w.Write(s2b("false"))
+	case TypeNull:
+		return w.Write(s2b("null"))
+	default:
+		return 0, fmt.Errorf("BUG: unexpected Value type: %d", v.t)
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/valyala/fastjson"
 	"log"
+	"os"
 	"strconv"
 )
 
@@ -68,16 +69,26 @@ func ExampleValue_MarshalTo() {
 	}
 
 	// Marshal items.0 into newly allocated buffer.
-	buf := v.Get("items", "0").MarshalTo(nil)
-	fmt.Printf("items.0 = %s\n", buf)
+	vv := v.Get("items", "0")
+	buf := vv.MarshalTo(nil)
+	fmt.Printf("M items.0 = %s\n", buf)
+	fmt.Fprint(os.Stdout, "W items.0 = ")
+	vv.WriteTo(os.Stdout)
+	fmt.Fprint(os.Stdout, "\n")
 
 	// Re-use buf for marshaling items.1.
-	buf = v.Get("items", "1").MarshalTo(buf[:0])
-	fmt.Printf("items.1 = %s\n", buf)
+	vv = v.Get("items", "1")
+	buf = vv.MarshalTo(buf[:0])
+	fmt.Printf("M items.1 = %s\n", buf)
+	fmt.Fprint(os.Stdout, "W items.1 = ")
+	vv.WriteTo(os.Stdout)
+	fmt.Fprint(os.Stdout, "\n")
 
 	// Output:
-	// items.0 = {"key":"foo","value":123.456,"arr":[1,"foo"]}
-	// items.1 = {"key":"bar","field":[3,4,5]}
+	// M items.0 = {"key":"foo","value":123.456,"arr":[1,"foo"]}
+	// W items.0 = {"key":"foo","value":123.456,"arr":[1,"foo"]}
+	// M items.1 = {"key":"bar","field":[3,4,5]}
+	// W items.1 = {"key":"bar","field":[3,4,5]}
 }
 
 func ExampleValue_Get() {
